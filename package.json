@@ -1,0 +1,25 @@
+{
+  "name": "package-node-mongo",
+  "version": "1.0.0",
+  "description": "Package for mongo",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bwise-it-devs/package-node-mongo.git"
+  },
+  "keywords": [
+    "mongo"
+  ],
+  "author": "Rosario Sensale",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/bwise-it-devs/package-node-mongo/issues"
+  },
+  "homepage": "https://github.com/bwise-it-devs/package-node-mongo#readme",
+  "dependencies": {
+    "mongoose": "^8.8.2"
+  }
+}
