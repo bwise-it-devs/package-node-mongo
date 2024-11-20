@@ -17,10 +17,7 @@ class MongoPackage {
 
   async connect() {
     try {
-      await mongoose.connect(this.mongoUri, {
-        useNewUrlParser: true,
-        useUnifiedTopology: true,
-      });
+      await mongoose.connect(this.mongoUri);
       console.log('Connected to MongoDB');
     } catch (error) {
       console.error('Error connecting to MongoDB:', error);
@@ -77,7 +74,7 @@ class MongoPackage {
       throw error;
     }
   }
-   
+
 }
 
 module.exports = MongoPackage;
