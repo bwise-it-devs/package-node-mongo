@@ -61,6 +61,23 @@ class MongoPackage {
       throw error;
     }
   }
+
+
+  async deleteItems(ids) {
+    try {
+      if (!Array.isArray(ids)) {
+        throw new Error('Input must be an array of _id');
+      }
+
+      const result = await this.model.deleteMany({ _id: { $in: ids } });
+      console.log(`${result.deletedCount} items deleted.`);
+      return result;
+    } catch (error) {
+      console.error('Error deleting items:', error);
+      throw error;
+    }
+  }
+   
 }
 
 module.exports = MongoPackage;
