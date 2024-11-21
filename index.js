@@ -50,6 +50,17 @@ class MongoPackage {
     }
   }
 
+  async existsItem(query, model = null) {
+    try {
+      const activeModel = this.getModel(model);
+      const exists = await activeModel.findOne(query).lean(); // Usa `lean` per prestazioni migliori
+      return !!exists; // Ritorna `true` se esiste, altrimenti `false`
+    } catch (error) {
+      console.error('Error checking item existence:', error);
+      throw error;
+    }
+  }
+
   async insertArray(items, updateIfExists = false, model = null) {
     try {
       // Controlla se l'array è vuoto o nullo
