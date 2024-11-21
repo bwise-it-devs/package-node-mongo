@@ -53,13 +53,14 @@ class MongoPackage {
   async existsItem(query, model = null) {
     try {
       const activeModel = this.getModel(model);
-      const exists = await activeModel.findOne(query).lean(); // Usa `lean` per prestazioni migliori
-      return !!exists; // Ritorna `true` se esiste, altrimenti `false`
+      const exists = await activeModel.exists(query); // Usa `exists` per una verifica veloce
+      return !!exists; // Ritorna `true` se esiste, `false` altrimenti
     } catch (error) {
       console.error('Error checking item existence:', error);
       throw error;
     }
   }
+
 
   async insertArray(items, updateIfExists = false, model = null) {
     try {
