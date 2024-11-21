@@ -5,12 +5,9 @@ class MongoPackage {
     if (!settings.mongoUri) {
       throw new Error("Missing 'mongoUri' in settings");
     }
-    if (!settings.model) {
-      throw new Error("Missing 'model' in settings");
-    }
 
     this.mongoUri = settings.mongoUri;
-    this.model = settings.model;
+    this.defaultModel = settings.model || null;
 
     this.connect();
   }
@@ -25,17 +22,25 @@ class MongoPackage {
     }
   }
 
-  async insertItem(item, updateIfExists = false) {
+  getModel(model) {
+    if (!model && !this.defaultModel) {
+      throw new Error("No model specified or default model provided");
+    }
+    return model || this.defaultModel;
+  }
+
+  async insertItem(item, updateIfExists = false, model = null) {
     try {
+      const activeModel = this.getModel(model);
       if (updateIfExists) {
         // Upsert: inserisce o aggiorna se esiste
-        const result = await this.model.findByIdAndUpdate(item._id, item, {
+        const result = await activeModel.findByIdAndUpdate(item._id, item, {
           new: true,
           upsert: true,
         });
         return result;
       } else {
-        const newItem = new this.model(item);
+        const newItem = new activeModel(item);
         await newItem.save();
         return newItem;
       }
@@ -45,11 +50,11 @@ class MongoPackage {
     }
   }
 
-  async insertArray(items, updateIfExists = false) {
+  async insertArray(items, updateIfExists = false, model = null) {
     try {
       const results = [];
       for (const item of items) {
-        const result = await this.insertItem(item, updateIfExists);
+        const result = await this.insertItem(item, updateIfExists, model);
         results.push(result);
       }
       return results;
@@ -59,14 +64,14 @@ class MongoPackage {
     }
   }
 
-
-  async deleteItems(ids) {
+  async deleteItems(ids, model = null) {
     try {
       if (!Array.isArray(ids)) {
         throw new Error('Input must be an array of _id');
       }
 
-      const result = await this.model.deleteMany({ _id: { $in: ids } });
+      const activeModel = this.getModel(model);
+      const result = await activeModel.deleteMany({ _id: { $in: ids } });
       console.log(`${result.deletedCount} items deleted.`);
       return result;
     } catch (error) {
@@ -75,30 +80,27 @@ class MongoPackage {
     }
   }
 
-
-
-  async findItems(query = {}, options = {}) {
+  async findItems(query = {}, options = {}, model = null) {
     try {
-      const results = await this.model.find(query, null, options);
+      const activeModel = this.getModel(model);
+      const results = await activeModel.find(query, null, options);
       return results;
     } catch (error) {
       console.error('Error finding items:', error);
       throw error;
     }
   }
-  
 
-  async runAggregation(pipeline) {
+  async runAggregation(pipeline, model = null) {
     try {
-      const results = await this.model.aggregate(pipeline);
+      const activeModel = this.getModel(model);
+      const results = await activeModel.aggregate(pipeline);
       return results;
     } catch (error) {
       console.error('Error running aggregation:', error);
       throw error;
     }
-  }  
-  
-
+  }
 }
 
 module.exports = MongoPackage;
