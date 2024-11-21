@@ -52,6 +52,12 @@ class MongoPackage {
 
   async insertArray(items, updateIfExists = false, model = null) {
     try {
+      // Controlla se l'array è vuoto o nullo
+      if (!items || items.length === 0) {
+        console.log('insertArray.items empty');
+        return []; // Restituisce un array vuoto immediatamente
+      }
+  
       const results = [];
       for (const item of items) {
         const result = await this.insertItem(item, updateIfExists, model);
@@ -64,6 +70,7 @@ class MongoPackage {
     }
   }
 
+  
   async deleteItems(ids, model = null) {
     try {
       if (!Array.isArray(ids)) {
