@@ -75,6 +75,20 @@ class MongoPackage {
     }
   }
 
+
+
+  async findItems(query = {}, options = {}) {
+    try {
+      const results = await this.model.find(query, null, options);
+      return results;
+    } catch (error) {
+      console.error('Error finding items:', error);
+      throw error;
+    }
+  }
+  
+  
+
 }
 
 module.exports = MongoPackage;
