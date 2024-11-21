@@ -87,6 +87,16 @@ class MongoPackage {
     }
   }
   
+
+  async runAggregation(pipeline) {
+    try {
+      const results = await this.model.aggregate(pipeline);
+      return results;
+    } catch (error) {
+      console.error('Error running aggregation:', error);
+      throw error;
+    }
+  }  
   
 
 }
