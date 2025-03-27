@@ -8,6 +8,7 @@
  * Supporta anche:
  * - Inserimenti condizionali (upsert)
  * - Inserimento in batch (insertArray)
+ * - Disconnessione esplicita dal database (disconnect)
  * - Operazioni personalizzabili tramite modello dinamico o predefinito
  *
  * Uso base:
@@ -44,6 +45,9 @@
  *   { $group: { _id: '$altroCampo', count: { $sum: 1 } } }
  * ]);
  * 
+ * // Disconnessione dal DB
+ * await db.disconnect();
+ * 
  * Note:
  * -----
  * - È possibile passare un model alternativo ad ogni metodo, utile se si lavora con più collezioni.
@@ -54,6 +58,12 @@
 const mongoose = require('mongoose');
 
 class MongoPackage {
+  /**
+   * Inizializza il package Mongo con URI e modello opzionale.
+   * @param {Object} settings - Impostazioni di connessione e modello.
+   * @param {string} settings.mongoUri - URI di connessione MongoDB.
+   * @param {mongoose.Model} [settings.model] - Modello Mongoose predefinito.
+   */
   constructor(settings) {
     if (!settings.mongoUri) {
       throw new Error("Missing 'mongoUri' in settings");
@@ -65,6 +75,9 @@ class MongoPackage {
     this.connect();
   }
 
+  /**
+   * Connette Mongoose al database MongoDB.
+   */
   async connect() {
     try {
       await mongoose.connect(this.mongoUri);
@@ -75,6 +88,11 @@ class MongoPackage {
     }
   }
 
+  /**
+   * Restituisce il modello da usare (predefinito o passato al metodo).
+   * @param {mongoose.Model|null} model - Modello opzionale.
+   * @returns {mongoose.Model}
+   */
   getModel(model) {
     if (!model && !this.defaultModel) {
       throw new Error("No model specified or default model provided");
@@ -82,11 +100,17 @@ class MongoPackage {
     return model || this.defaultModel;
   }
 
+  /**
+   * Inserisce un singolo documento, con possibilità di upsert.
+   * @param {Object} item - Documento da inserire.
+   * @param {boolean} [updateIfExists=false] - Se true, esegue upsert.
+   * @param {mongoose.Model|null} [model=null] - Modello alternativo.
+   * @returns {Promise<Object>} Documento inserito o aggiornato.
+   */
   async insertItem(item, updateIfExists = false, model = null) {
     try {
       const activeModel = this.getModel(model);
       if (updateIfExists) {
-        // Upsert: inserisce o aggiorna se esiste
         const result = await activeModel.findByIdAndUpdate(item._id, item, {
           new: true,
           upsert: true,
@@ -103,26 +127,37 @@ class MongoPackage {
     }
   }
 
+  /**
+   * Verifica se esiste almeno un documento che soddisfa la query.
+   * @param {Object} query - Filtro di ricerca.
+   * @param {mongoose.Model|null} [model=null] - Modello alternativo.
+   * @returns {Promise<boolean>} true se esiste almeno un match.
+   */
   async existsItem(query, model = null) {
     try {
       const activeModel = this.getModel(model);
-      const exists = await activeModel.exists(query); // Usa `exists` per una verifica veloce
-      return !!exists; // Ritorna `true` se esiste, `false` altrimenti
+      const exists = await activeModel.exists(query);
+      return !!exists;
     } catch (error) {
       console.error('Error checking item existence:', error);
       throw error;
     }
   }
 
-
+  /**
+   * Inserisce un array di documenti, con possibilità di upsert.
+   * @param {Array<Object>} items - Array di documenti da inserire.
+   * @param {boolean} [updateIfExists=false] - Se true, usa upsert per ogni item.
+   * @param {mongoose.Model|null} [model=null] - Modello alternativo.
+   * @returns {Promise<Array>} Array dei risultati.
+   */
   async insertArray(items, updateIfExists = false, model = null) {
     try {
-      // Controlla se l'array è vuoto o nullo
       if (!items || items.length === 0) {
         console.log('insertArray.items empty');
-        return []; // Restituisce un array vuoto immediatamente
+        return [];
       }
-  
+
       const results = [];
       for (const item of items) {
         const result = await this.insertItem(item, updateIfExists, model);
@@ -135,7 +170,12 @@ class MongoPackage {
     }
   }
 
-  
+  /**
+   * Cancella documenti dato un array di `_id`.
+   * @param {Array<string>} ids - Array di ID da cancellare.
+   * @param {mongoose.Model|null} [model=null] - Modello alternativo.
+   * @returns {Promise<Object>} Risultato dell'operazione.
+   */
   async deleteItems(ids, model = null) {
     try {
       if (!Array.isArray(ids)) {
@@ -152,6 +192,13 @@ class MongoPackage {
     }
   }
 
+  /**
+   * Trova documenti secondo una query Mongoose.
+   * @param {Object} [query={}] - Condizione di ricerca.
+   * @param {Object} [options={}] - Opzioni (es. limit, sort).
+   * @param {mongoose.Model|null} [model=null] - Modello alternativo.
+   * @returns {Promise<Array>} Risultati della query.
+   */
   async findItems(query = {}, options = {}, model = null) {
     try {
       const activeModel = this.getModel(model);
@@ -163,6 +210,12 @@ class MongoPackage {
     }
   }
 
+  /**
+   * Esegue un'aggregazione MongoDB con pipeline.
+   * @param {Array<Object>} pipeline - Fasi dell'aggregazione.
+   * @param {mongoose.Model|null} [model=null] - Modello alternativo.
+   * @returns {Promise<Array>} Risultati aggregati.
+   */
   async runAggregation(pipeline, model = null) {
     try {
       const activeModel = this.getModel(model);
@@ -170,6 +223,19 @@ class MongoPackage {
       return results;
     } catch (error) {
       console.error('Error running aggregation:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Chiude la connessione Mongoose con il database.
+   */
+  async disconnect() {
+    try {
+      await mongoose.disconnect();
+      console.log('Disconnected from MongoDB');
+    } catch (error) {
+      console.error('Error disconnecting from MongoDB:', error);
       throw error;
     }
   }
