@@ -1,3 +1,56 @@
+/**
+ * MongoPackage
+ * ------------
+ * Questo package incapsula funzioni comuni per interagire con MongoDB tramite Mongoose.
+ * È pensato per essere riutilizzabile in vari contesti, permettendo di collegarsi al DB,
+ * inserire documenti, verificare esistenza, cancellare, trovare o aggregare dati.
+ * 
+ * Supporta anche:
+ * - Inserimenti condizionali (upsert)
+ * - Inserimento in batch (insertArray)
+ * - Operazioni personalizzabili tramite modello dinamico o predefinito
+ *
+ * Uso base:
+ * ---------
+ * const MyModel = require('./models/MyModel');
+ * const MongoPackage = require('./MongoPackage');
+ * 
+ * const db = new MongoPackage({
+ *   mongoUri: 'mongodb://localhost:27017/mio-db',
+ *   model: MyModel, // opzionale: modello predefinito
+ * });
+ * 
+ * // Inserimento semplice
+ * const nuovoItem = await db.insertItem({ _id: '123', nome: 'Test' });
+ * 
+ * // Inserimento con update se esiste già
+ * const upserted = await db.insertItem({ _id: '123', nome: 'Aggiornato' }, true);
+ * 
+ * // Verifica esistenza
+ * const esiste = await db.existsItem({ _id: '123' }); // true/false
+ * 
+ * // Inserimento array di item
+ * await db.insertArray([{ _id: 'a' }, { _id: 'b' }], true);
+ * 
+ * // Cancellazione multipla
+ * await db.deleteItems(['123', 'a']);
+ * 
+ * // Ricerca con query
+ * const risultati = await db.findItems({ nome: 'Test' }, { limit: 10 });
+ * 
+ * // Aggregazione
+ * const aggregati = await db.runAggregation([
+ *   { $match: { campo: 'valore' } },
+ *   { $group: { _id: '$altroCampo', count: { $sum: 1 } } }
+ * ]);
+ * 
+ * Note:
+ * -----
+ * - È possibile passare un model alternativo ad ogni metodo, utile se si lavora con più collezioni.
+ * - In caso di errore, i metodi loggano l’errore e lo rilanciano.
+ */
+
+
 const mongoose = require('mongoose');
 
 class MongoPackage {
