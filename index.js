@@ -99,7 +99,7 @@ class MongoPackage {
     }
     return model || this.defaultModel;
   }
-
+    
   /**
    * Inserisce un singolo documento, con possibilità di upsert.
    * @param {Object} item - Documento da inserire.
@@ -110,11 +110,16 @@ class MongoPackage {
   async insertItem(item, updateIfExists = false, model = null) {
     try {
       const activeModel = this.getModel(model);
+
       if (updateIfExists) {
-        const result = await activeModel.findByIdAndUpdate(item._id, item, {
-          new: true,
-          upsert: true,
-        });
+        const result = await activeModel.findByIdAndUpdate(
+          item._id,
+          { $set: item }, // ✅ assicura aggiornamento completo anche di campi annidati
+          {
+            new: true,
+            upsert: true,
+          }
+        );
         return result;
       } else {
         const newItem = new activeModel(item);
@@ -126,6 +131,7 @@ class MongoPackage {
       throw error;
     }
   }
+
 
   /**
    * Verifica se esiste almeno un documento che soddisfa la query.
