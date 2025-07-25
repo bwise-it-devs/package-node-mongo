@@ -45,6 +45,15 @@
  *   { $group: { _id: '$altroCampo', count: { $sum: 1 } } }
  * ]);
  * 
+ * 
+ * await cMongo.updateManyField(
+ *  { currentseason: data.package.season },  // filtro
+ * 'update_at',                            // campo custom
+ * new Date(),                             // valore
+ * mongoose.model('tbl_tournaments', tournamentSchema)
+ * );
+ * 
+ * 
  * // Disconnessione dal DB
  * await db.disconnect();
  * 
@@ -245,6 +254,30 @@ class MongoPackage {
       throw error;
     }
   }
+
+
+  /**
+   * Aggiorna un campo (di default 'updatedAt') su tutti i documenti che rispettano il filtro.
+   *
+   * @param {Object} filter - Filtro per selezionare i documenti (es. { currentseason: '2025' }).
+   * @param {string} [fieldName='updatedAt'] - Nome del campo da aggiornare.
+   * @param {any} [value=new Date()] - Valore da assegnare al campo.
+   * @param {mongoose.Model|null} [model=null] - Modello alternativo.
+   * @returns {Promise<Object>} Risultato dell'updateMany.
+   */
+  async updateManyField(filter, fieldName = 'updatedAt', value = new Date(), model = null) {
+    try {
+      const activeModel = this.getModel(model);
+      const result = await activeModel.updateMany(filter, { $set: { [fieldName]: value } });
+      console.log(`${result.modifiedCount} documents updated (field: ${fieldName}).`);
+      return result;
+    } catch (error) {
+      console.error('Error updating documents:', error);
+      throw error;
+    }
+  }
+  
+  
 }
 
 module.exports = MongoPackage;
