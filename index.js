@@ -256,6 +256,58 @@ class MongoPackage {
   }
 
 
+
+  /**
+     * Esegue una find "raw" su una collection senza schema.
+     * @param {string} collectionName
+     * @param {Object} [filter={}]
+     * @param {Object} [options={}]  // es: { limit, skip, sort, projection, batchSize }
+     * @returns {Promise<Array>}
+     */
+  async queryCollection(collectionName, filter = {}, options = {}) {
+    try {
+      const coll = mongoose.connection.db.collection(collectionName);
+      const cursor = coll.find(filter, {
+        limit: options.limit,
+        skip: options.skip,
+        sort: options.sort,
+        projection: options.projection,
+        batchSize: options.batchSize,
+        readPreference: options.readPreference, // opzionale
+      });
+      const docs = await cursor.toArray();
+      return docs;
+    } catch (err) {
+      console.error('Error in queryCollection:', err);
+      throw err;
+    }
+  }
+
+  /**
+   * Esegue una aggregation "raw" su una collection senza schema.
+   * @param {string} collectionName
+   * @param {Array<Object>} pipeline
+   * @param {Object} [options={}] // es: { allowDiskUse: true }
+   * @returns {Promise<Array>}
+   */
+  async aggregateCollection(collectionName, pipeline, options = {}) {
+    try {
+      const coll = mongoose.connection.db.collection(collectionName);
+      const cursor = coll.aggregate(pipeline, {
+        allowDiskUse: options.allowDiskUse ?? true,
+        maxTimeMS: options.maxTimeMS, // opzionale
+        bypassDocumentValidation: options.bypassDocumentValidation,
+      });
+      const docs = await cursor.toArray();
+      return docs;
+    } catch (err) {
+      console.error('Error in aggregateCollection:', err);
+      throw err;
+    }
+  }
+
+
+
   /**
    * Aggiorna un campo (di default 'updatedAt') su tutti i documenti che rispettano il filtro.
    *
