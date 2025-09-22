@@ -98,6 +98,20 @@ class MongoPackage {
     this.connect();
   }
 
+
+  // Helper: crea/riusa un modello Mongoose "schema-less" per una collection
+  getSchemaLessModel(collectionName) {
+    const { Schema } = mongoose;
+    const schema = new Schema({}, {
+      strict: false,
+      collection: collectionName,
+      timestamps: false,
+    });
+    const modelName = `SchemaLess_${collectionName}`;
+    return mongoose.models[modelName] || mongoose.model(modelName, schema);
+  }
+
+
   /**
    * Connette Mongoose al database MongoDB.
    */
@@ -222,16 +236,27 @@ class MongoPackage {
   }
 
   /**
-   * Trova documenti secondo una query Mongoose.
+   * Trova documenti secondo una query Mongoose o in schema-less passando il nome collection.
    * @param {Object} [query={}] - Condizione di ricerca.
-   * @param {Object} [options={}] - Opzioni (es. limit, sort).
-   * @param {mongoose.Model|null} [model=null] - Modello alternativo.
-   * @returns {Promise<Array>} Risultati della query.
+   * @param {Object|string} [options={}] - Opzioni (es. { limit, sort, projection }) oppure collectionName (string).
+   * @param {mongoose.Model|string|null} [model=null] - Modello Mongoose o nome collection (string) per schema-less.
+   * @returns {Promise<Array>}
    */
   async findItems(query = {}, options = {}, model = null) {
     try {
+      // Overload: se options è una stringa e non c'è model → è il nome della collection
+      if (typeof options === 'string' && !model) {
+        model = this.getSchemaLessModel(options);
+        options = {};
+      }
+      // Overload: se model è una stringa → è il nome della collection
+      if (typeof model === 'string' || model instanceof String) {
+        model = this.getSchemaLessModel(model);
+      }
+
       const activeModel = this.getModel(model);
-      const results = await activeModel.find(query, null, options);
+      const { projection = null, ...opts } = options || {};
+      const results = await activeModel.find(query, projection, opts);
       return results;
     } catch (error) {
       console.error('Error finding items:', error);
@@ -240,15 +265,29 @@ class MongoPackage {
   }
 
   /**
-   * Esegue un'aggregazione MongoDB con pipeline.
-   * @param {Array<Object>} pipeline - Fasi dell'aggregazione.
-   * @param {mongoose.Model|null} [model=null] - Modello alternativo.
-   * @returns {Promise<Array>} Risultati aggregati.
+   * Esegue un'aggregazione con Mongoose o schema-less passando il nome collection.
+   * @param {Array<Object>} pipeline
+   * @param {mongoose.Model|string|null} [model=null] - Modello Mongoose o nome collection (string) per schema-less.
+   * @param {Object} [options={}] - Es. { allowDiskUse: true, maxTimeMS: 120000 }
+   * @returns {Promise<Array>}
    */
-  async runAggregation(pipeline, model = null) {
+  async runAggregation(pipeline, model = null, options = {}) {
     try {
+      // Overload: se model è una stringa → è il nome della collection
+      if (typeof model === 'string' || model instanceof String) {
+        model = this.getSchemaLessModel(model);
+      }
+
       const activeModel = this.getModel(model);
-      const results = await activeModel.aggregate(pipeline);
+      const agg = activeModel.aggregate(pipeline, {
+        allowDiskUse: options.allowDiskUse ?? true,
+      });
+
+      if (options.maxTimeMS) {
+        agg.option({ maxTimeMS: options.maxTimeMS });
+      }
+
+      const results = await agg.exec();
       return results;
     } catch (error) {
       console.error('Error running aggregation:', error);
