@@ -45,17 +45,31 @@
  *   { $group: { _id: '$altroCampo', count: { $sum: 1 } } }
  * ]);
  * 
- * 
- * await cMongo.updateManyField(
- *  { currentseason: data.package.season },  // filtro
- * 'update_at',                            // campo custom
- * new Date(),                             // valore
- * mongoose.model('tbl_tournaments', tournamentSchema)
+ * // Esempio di updateManyField
+ * await db.updateManyField(
+ *   { currentseason: '2025' },  // filtro
+ *   'update_at',                // campo custom
+ *   new Date(),                 // valore
+ *   MyModel                     // modello (opzionale se già impostato di default)
  * );
- * 
  * 
  * // Disconnessione dal DB
  * await db.disconnect();
+ * 
+ * Esempi avanzati di utilizzo:
+ * ----------------------------
+ * // Utilizzo di un modello alternativo per una singola operazione
+ * const AltroModel = require('./models/AltroModel');
+ * const altroRisultato = await db.insertItem({ nome: 'Altro' }, false, AltroModel);
+ * 
+ * // Query "raw" su una collection senza schema Mongoose
+ * const docs = await db.queryCollection('utenti', { attivo: true }, { limit: 5, sort: { nome: 1 } });
+ * 
+ * // Aggregazione "raw" su una collection senza schema
+ * const agg = await db.aggregateCollection('ordini', [
+ *   { $match: { stato: 'spedito' } },
+ *   { $group: { _id: '$cliente', totale: { $sum: '$importo' } } }
+ * ]);
  * 
  * Note:
  * -----
