@@ -1,105 +1,162 @@
 /**
  * MongoPackage
  * ------------
- * Questo package incapsula funzioni comuni per interagire con MongoDB tramite Mongoose.
- * È pensato per essere riutilizzabile in vari contesti, permettendo di collegarsi al DB,
- * inserire documenti, verificare esistenza, cancellare, trovare o aggregare dati.
+ * Libreria unica per gestire connessioni MongoDB tramite Mongoose e MongoClient nativo.
  * 
- * Supporta anche:
- * - Inserimenti condizionali (upsert)
- * - Inserimento in batch (insertArray)
- * - Disconnessione esplicita dal database (disconnect)
- * - Operazioni personalizzabili tramite modello dinamico o predefinito
- *
- * Uso base:
- * ---------
- * const MyModel = require('./models/MyModel');
- * const MongoPackage = require('./MongoPackage');
+ * Include:
+ * - Connessione Mongoose (schema-based)
+ * - Connessione MongoClient (raw driver)
+ * - Singleton globale con reconnect automatico
+ * - Supporto logging e prevenzione connessioni parallele
+ * - Metodi CRUD, aggregazioni e query schema-less
  * 
- * const db = new MongoPackage({
- *   mongoUri: 'mongodb://localhost:27017/mio-db',
- *   model: MyModel, // opzionale: modello predefinito
- * });
- * 
- * // Inserimento semplice
- * const nuovoItem = await db.insertItem({ _id: '123', nome: 'Test' });
- * 
- * // Inserimento con update se esiste già
- * const upserted = await db.insertItem({ _id: '123', nome: 'Aggiornato' }, true);
- * 
- * // Verifica esistenza
- * const esiste = await db.existsItem({ _id: '123' }); // true/false
- * 
- * // Inserimento array di item
- * await db.insertArray([{ _id: 'a' }, { _id: 'b' }], true);
- * 
- * // Cancellazione multipla
- * await db.deleteItems(['123', 'a']);
- * 
- * // Ricerca con query
- * const risultati = await db.findItems({ nome: 'Test' }, { limit: 10 });
- * 
- * // Aggregazione
- * const aggregati = await db.runAggregation([
- *   { $match: { campo: 'valore' } },
- *   { $group: { _id: '$altroCampo', count: { $sum: 1 } } }
- * ]);
- * 
- * // Esempio di updateManyField
- * await db.updateManyField(
- *   { currentseason: '2025' },  // filtro
- *   'update_at',                // campo custom
- *   new Date(),                 // valore
- *   MyModel                     // modello (opzionale se già impostato di default)
- * );
- * 
- * // Disconnessione dal DB
- * await db.disconnect();
- * 
- * Esempi avanzati di utilizzo:
- * ----------------------------
- * // Utilizzo di un modello alternativo per una singola operazione
- * const AltroModel = require('./models/AltroModel');
- * const altroRisultato = await db.insertItem({ nome: 'Altro' }, false, AltroModel);
- * 
- * // Query "raw" su una collection senza schema Mongoose
- * const docs = await db.queryCollection('utenti', { attivo: true }, { limit: 5, sort: { nome: 1 } });
- * 
- * // Aggregazione "raw" su una collection senza schema
- * const agg = await db.aggregateCollection('ordini', [
- *   { $match: { stato: 'spedito' } },
- *   { $group: { _id: '$cliente', totale: { $sum: '$importo' } } }
- * ]);
- * 
- * Note:
- * -----
- * - È possibile passare un model alternativo ad ogni metodo, utile se si lavora con più collezioni.
- * - In caso di errore, i metodi loggano l’errore e lo rilanciano.
+ * Retrocompatibile con il vecchio `package-node-mongo` e `mongoSingleton.js`
  */
 
-
 const mongoose = require('mongoose');
+const { MongoClient } = require('mongodb');
 
 class MongoPackage {
+  // --- Proprietà statiche per il singleton ---
+  static instance = null;
+  static isConnecting = false;
+
   /**
-   * Inizializza il package Mongo con URI e modello opzionale.
-   * @param {Object} settings - Impostazioni di connessione e modello.
-   * @param {string} settings.mongoUri - URI di connessione MongoDB.
-   * @param {mongoose.Model} [settings.model] - Modello Mongoose predefinito.
+   * Restituisce un'istanza singleton condivisa (retrocompatibile)
+   * @param {Object} settings - { mongoUri, model, dbName? }
+   * @param {Object} logger - opzionale, default console
    */
-  constructor(settings) {
-    if (!settings.mongoUri) {
+  static async getInstance(settings, logger = console) {
+    if (this.instance && this.instance.isConnected()) {
+      return this.instance;
+    }
+
+    if (this.isConnecting) {
+      logger.warn('⚠️ MongoPackage: connessione in corso, attendo...');
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      return this.instance;
+    }
+
+    this.isConnecting = true;
+
+    try {
+      const pkg = new MongoPackage(settings, logger);
+      await pkg.connect();
+
+      this.instance = pkg;
+      this.isConnecting = false;
+
+      logger.info(`✅ MongoPackage connesso a ${settings.mongoUri}`);
+      return this.instance;
+    } catch (err) {
+      this.isConnecting = false;
+      logger.error('❌ Errore connessione MongoPackage:', err);
+      throw err;
+    }
+  }
+
+  /**
+   * Costruttore: inizializza ma non connette subito
+   */
+  constructor(settings, logger = console) {
+    if (!settings?.mongoUri) {
       throw new Error("Missing 'mongoUri' in settings");
     }
 
     this.mongoUri = settings.mongoUri;
     this.defaultModel = settings.model || null;
+    this.dbName = settings.dbName || null;
+    this.logger = logger;
 
-    this.connect();
+    this.client = null;
+    this.db = null;
   }
 
+  /**
+   * Controlla se il client MongoDB nativo è connesso
+   */
+  isConnected() {
+    return (
+      this.client?.topology?.isConnected?.() ||
+      mongoose.connection.readyState === 1
+    );
+  }
 
-  // Helper: crea/riusa un modello Mongoose "schema-less" per una collection
+  /**
+   * Connette sia Mongoose che il driver nativo MongoClient
+   */
+  async connect() {
+    try {
+      // ✅ Connessione Mongoose
+      await mongoose.connect(this.mongoUri);
+      this.logger.info('🧩 Mongoose connesso');
+
+      // ✅ Connessione MongoClient nativo
+      this.client = new MongoClient(this.mongoUri, {
+        serverSelectionTimeoutMS: 10000,
+        maxPoolSize: 20,
+      });
+      await this.client.connect();
+
+      // --- Determina il nome del database ---
+      let dbName = this.dbName;
+      if (!dbName) {
+        const match = this.mongoUri.match(/\/([^/?]+)(\?|$)/);
+        dbName = match ? match[1] : 'test';
+      }
+
+      this.db = this.client.db(dbName);
+      this.logger.info(`🧠 MongoClient connesso al database: ${dbName}`);
+
+      // --- Eventi ---
+      this.client.on('close', async () => {
+        this.logger.warn('⚠️ MongoDB connection closed. Tentativo di riconnessione...');
+        MongoPackage.instance = null;
+        try {
+          await MongoPackage.getInstance({ mongoUri: this.mongoUri, dbName: this.dbName }, this.logger);
+        } catch (err) {
+          this.logger.error('❌ Riconnessione fallita:', err);
+        }
+      });
+
+      this.client.on('error', (err) => {
+        this.logger.error('❌ Errore MongoDB:', err);
+      });
+
+      this.client.on('reconnect', () => {
+        this.logger.info('🔄 MongoDB riconnesso correttamente');
+      });
+
+    } catch (error) {
+      this.logger.error('❌ Errore connessione:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Chiude tutte le connessioni
+   */
+  async disconnect() {
+    try {
+      if (this.client) {
+        await this.client.close();
+        this.logger.info('🛑 MongoClient chiuso');
+      }
+      await mongoose.disconnect();
+      this.logger.info('🛑 Mongoose disconnesso');
+    } catch (error) {
+      this.logger.error('❌ Errore disconnessione:', error);
+      throw error;
+    }
+  }
+
+  // ------------------------------------------------------------------
+  // 🔽 Tutti i metodi CRUD e aggregazione originali (retrocompatibili)
+  // ------------------------------------------------------------------
+
+  /**
+   * Helper: crea/riusa un modello Mongoose "schema-less" per una collection
+   */
   getSchemaLessModel(collectionName) {
     const { Schema } = mongoose;
     const schema = new Schema({}, {
@@ -111,24 +168,8 @@ class MongoPackage {
     return mongoose.models[modelName] || mongoose.model(modelName, schema);
   }
 
-
-  /**
-   * Connette Mongoose al database MongoDB.
-   */
-  async connect() {
-    try {
-      await mongoose.connect(this.mongoUri);
-      console.log('Connected to MongoDB');
-    } catch (error) {
-      console.error('Error connecting to MongoDB:', error);
-      throw error;
-    }
-  }
-
   /**
    * Restituisce il modello da usare (predefinito o passato al metodo).
-   * @param {mongoose.Model|null} model - Modello opzionale.
-   * @returns {mongoose.Model}
    */
   getModel(model) {
     if (!model && !this.defaultModel) {
@@ -136,13 +177,9 @@ class MongoPackage {
     }
     return model || this.defaultModel;
   }
-    
+
   /**
    * Inserisce un singolo documento, con possibilità di upsert.
-   * @param {Object} item - Documento da inserire.
-   * @param {boolean} [updateIfExists=false] - Se true, esegue upsert.
-   * @param {mongoose.Model|null} [model=null] - Modello alternativo.
-   * @returns {Promise<Object>} Documento inserito o aggiornato.
    */
   async insertItem(item, updateIfExists = false, model = null) {
     try {
@@ -151,11 +188,8 @@ class MongoPackage {
       if (updateIfExists) {
         const result = await activeModel.findByIdAndUpdate(
           item._id,
-          { $set: item }, // ✅ assicura aggiornamento completo anche di campi annidati
-          {
-            new: true,
-            upsert: true,
-          }
+          { $set: item },
+          { new: true, upsert: true }
         );
         return result;
       } else {
@@ -164,17 +198,13 @@ class MongoPackage {
         return newItem;
       }
     } catch (error) {
-      console.error('Error inserting item:', error);
+      this.logger.error('Error inserting item:', error);
       throw error;
     }
   }
 
-
   /**
    * Verifica se esiste almeno un documento che soddisfa la query.
-   * @param {Object} query - Filtro di ricerca.
-   * @param {mongoose.Model|null} [model=null] - Modello alternativo.
-   * @returns {Promise<boolean>} true se esiste almeno un match.
    */
   async existsItem(query, model = null) {
     try {
@@ -182,22 +212,18 @@ class MongoPackage {
       const exists = await activeModel.exists(query);
       return !!exists;
     } catch (error) {
-      console.error('Error checking item existence:', error);
+      this.logger.error('Error checking item existence:', error);
       throw error;
     }
   }
 
   /**
    * Inserisce un array di documenti, con possibilità di upsert.
-   * @param {Array<Object>} items - Array di documenti da inserire.
-   * @param {boolean} [updateIfExists=false] - Se true, usa upsert per ogni item.
-   * @param {mongoose.Model|null} [model=null] - Modello alternativo.
-   * @returns {Promise<Array>} Array dei risultati.
    */
   async insertArray(items, updateIfExists = false, model = null) {
     try {
       if (!items || items.length === 0) {
-        console.log('insertArray.items empty');
+        this.logger.info('insertArray.items empty');
         return [];
       }
 
@@ -208,16 +234,13 @@ class MongoPackage {
       }
       return results;
     } catch (error) {
-      console.error('Error inserting array:', error);
+      this.logger.error('Error inserting array:', error);
       throw error;
     }
   }
 
   /**
    * Cancella documenti dato un array di `_id`.
-   * @param {Array<string>} ids - Array di ID da cancellare.
-   * @param {mongoose.Model|null} [model=null] - Modello alternativo.
-   * @returns {Promise<Object>} Risultato dell'operazione.
    */
   async deleteItems(ids, model = null) {
     try {
@@ -227,29 +250,23 @@ class MongoPackage {
 
       const activeModel = this.getModel(model);
       const result = await activeModel.deleteMany({ _id: { $in: ids } });
-      console.log(`${result.deletedCount} items deleted.`);
+      this.logger.info(`${result.deletedCount} items deleted.`);
       return result;
     } catch (error) {
-      console.error('Error deleting items:', error);
+      this.logger.error('Error deleting items:', error);
       throw error;
     }
   }
 
   /**
    * Trova documenti secondo una query Mongoose o in schema-less passando il nome collection.
-   * @param {Object} [query={}] - Condizione di ricerca.
-   * @param {Object|string} [options={}] - Opzioni (es. { limit, sort, projection }) oppure collectionName (string).
-   * @param {mongoose.Model|string|null} [model=null] - Modello Mongoose o nome collection (string) per schema-less.
-   * @returns {Promise<Array>}
    */
   async findItems(query = {}, options = {}, model = null) {
     try {
-      // Overload: se options è una stringa e non c'è model → è il nome della collection
       if (typeof options === 'string' && !model) {
         model = this.getSchemaLessModel(options);
         options = {};
       }
-      // Overload: se model è una stringa → è il nome della collection
       if (typeof model === 'string' || model instanceof String) {
         model = this.getSchemaLessModel(model);
       }
@@ -259,21 +276,16 @@ class MongoPackage {
       const results = await activeModel.find(query, projection, opts);
       return results;
     } catch (error) {
-      console.error('Error finding items:', error);
+      this.logger.error('Error finding items:', error);
       throw error;
     }
   }
 
   /**
    * Esegue un'aggregazione con Mongoose o schema-less passando il nome collection.
-   * @param {Array<Object>} pipeline
-   * @param {mongoose.Model|string|null} [model=null] - Modello Mongoose o nome collection (string) per schema-less.
-   * @param {Object} [options={}] - Es. { allowDiskUse: true, maxTimeMS: 120000 }
-   * @returns {Promise<Array>}
    */
   async runAggregation(pipeline, model = null, options = {}) {
     try {
-      // Overload: se model è una stringa → è il nome della collection
       if (typeof model === 'string' || model instanceof String) {
         model = this.getSchemaLessModel(model);
       }
@@ -290,99 +302,66 @@ class MongoPackage {
       const results = await agg.exec();
       return results;
     } catch (error) {
-      console.error('Error running aggregation:', error);
+      this.logger.error('Error running aggregation:', error);
       throw error;
     }
   }
 
   /**
-   * Chiude la connessione Mongoose con il database.
+   * Esegue una find "raw" su una collection senza schema.
    */
-  async disconnect() {
-    try {
-      await mongoose.disconnect();
-      console.log('Disconnected from MongoDB');
-    } catch (error) {
-      console.error('Error disconnecting from MongoDB:', error);
-      throw error;
-    }
-  }
-
-
-
-  /**
-     * Esegue una find "raw" su una collection senza schema.
-     * @param {string} collectionName
-     * @param {Object} [filter={}]
-     * @param {Object} [options={}]  // es: { limit, skip, sort, projection, batchSize }
-     * @returns {Promise<Array>}
-     */
   async queryCollection(collectionName, filter = {}, options = {}) {
     try {
-      const coll = mongoose.connection.db.collection(collectionName);
+      const coll = this.db.collection(collectionName);
       const cursor = coll.find(filter, {
         limit: options.limit,
         skip: options.skip,
         sort: options.sort,
         projection: options.projection,
         batchSize: options.batchSize,
-        readPreference: options.readPreference, // opzionale
+        readPreference: options.readPreference,
       });
       const docs = await cursor.toArray();
       return docs;
     } catch (err) {
-      console.error('Error in queryCollection:', err);
+      this.logger.error('Error in queryCollection:', err);
       throw err;
     }
   }
 
   /**
    * Esegue una aggregation "raw" su una collection senza schema.
-   * @param {string} collectionName
-   * @param {Array<Object>} pipeline
-   * @param {Object} [options={}] // es: { allowDiskUse: true }
-   * @returns {Promise<Array>}
    */
   async aggregateCollection(collectionName, pipeline, options = {}) {
     try {
-      const coll = mongoose.connection.db.collection(collectionName);
+      const coll = this.db.collection(collectionName);
       const cursor = coll.aggregate(pipeline, {
         allowDiskUse: options.allowDiskUse ?? true,
-        maxTimeMS: options.maxTimeMS, // opzionale
+        maxTimeMS: options.maxTimeMS,
         bypassDocumentValidation: options.bypassDocumentValidation,
       });
       const docs = await cursor.toArray();
       return docs;
     } catch (err) {
-      console.error('Error in aggregateCollection:', err);
+      this.logger.error('Error in aggregateCollection:', err);
       throw err;
     }
   }
 
-
-
   /**
    * Aggiorna un campo (di default 'updatedAt') su tutti i documenti che rispettano il filtro.
-   *
-   * @param {Object} filter - Filtro per selezionare i documenti (es. { currentseason: '2025' }).
-   * @param {string} [fieldName='updatedAt'] - Nome del campo da aggiornare.
-   * @param {any} [value=new Date()] - Valore da assegnare al campo.
-   * @param {mongoose.Model|null} [model=null] - Modello alternativo.
-   * @returns {Promise<Object>} Risultato dell'updateMany.
    */
   async updateManyField(filter, fieldName = 'updatedAt', value = new Date(), model = null) {
     try {
       const activeModel = this.getModel(model);
       const result = await activeModel.updateMany(filter, { $set: { [fieldName]: value } });
-      console.log(`${result.modifiedCount} documents updated (field: ${fieldName}).`);
+      this.logger.info(`${result.modifiedCount} documents updated (field: ${fieldName}).`);
       return result;
     } catch (error) {
-      console.error('Error updating documents:', error);
+      this.logger.error('Error updating documents:', error);
       throw error;
     }
   }
-  
-  
 }
 
 module.exports = MongoPackage;
